@@ -2,6 +2,9 @@ apiVersion: mxl.media.fn/v1alpha1
 kind: MxlMediaFunctionParameters
 metadata:
   name: writer-1080p25-v210
+  label:
+    app: media-processing-3G
+    function: video-writer
   namespace: media
 spec:
   role: writer
@@ -41,113 +44,92 @@ spec:
             height: 1080
           fps: "25/1"
 
-  # TODO 
-  # Have section with capabilites and scenario -- Could be free text.
-  # Maybe an array of cases. 
-  # Driver-facing compute hints (not enforced by Kubernetes unless a mutating webhook
-  # copies them into Pod resources.requests/limits)
-
+  
   # Resource requirements for the media function
   requirements:
     compute:
-      cpuLimit: "2000m"            # desired cap for container
+      cpuLimit: "2000m"            # Millicores (m): A fractional part of a core. 1 CPU is equal to 1000m. 500m: Half a core (0.5 CPU).100m: One-tenth of a core (0.1 CPU).
       cpuClass: "performance"      # driver-defined tier (e.g., latency|balanced|performance)
-      memoryRequired: "4Gi"        # working set RAM expected by the function
+      memoryRequired: "4Gi"        # Requests and limits in units as expressed in Kubernetes (e.g., Mi, Gi)
 
-    domain:
-      path: "/mxl/domain1"
 
     timing:
-      latencyBudgetUsec: 500
+      latencyBudgetUsec: 500      # Microseconds (usec) latency budget for processing each media unit (e.g., frame) - that the media function aims to meet 
 
   # NEW: host platform capabilities (inventory/hints for driver-side placement logic)
   reference_platform:
     hostCapabilities:
-      cpu:
-        class: "intel-xeon-spr"    # free-form: e.g., "intel-xeon-gold", "amd-epyc"
-        sockets: 2
-        coresPerSocket: 32
+      cpus:
+        generation: "Skylake"  # CPU microarchitecture generation (e.g., Skylake, Ice Lake, etc.)
         # Selected CPU features discovered via NFD or cpuid
         features:
           - AVX512F
           - AVX512DQ
           - SGX
-        numa:
-          - id: 0
-            cpus: "0-31"           # optional: CPU set notation
-          - id: 1
-            cpus: "32-63"
-
-      nic:
-        # High-level NIC inventory and SR-IOV capabilities
-        vendorId: "15b3"           # Mellanox/NVIDIA PCI vendor
-        model: "ConnectX-7"
-        ports:
-          - name: "ens1f0"
-            speedGbps: 200
-            pciAddress: "0000:a1:00.0"
-            numaNode: 0
-          - name: "ens1f1"
-            speedGbps: 200
-            pciAddress: "0000:a1:00.1"
-            numaNode: 1
-        sriov:
-          supported: true
-          pfCount: 2
-          vfPerPf: 64
-          # If the NIC/driver supports rate caps per VF, expose expected envelope:
-          minTxRateMbps: 0
-          maxTxRateMbps: 100000
-          features:
+  
+      networks:
+        - name: eth0
+          bandwidth:
+            input:
+              min: 1500Mb
+              max: 3000Mb
+            output:
+              min: 1000Mb
+              max: 2500M
+          features: 
+            - jumbo_frames
             - rdma
-            - roce
-            - vlan
-            - spoofchk
-            - trust
 
-      pcie:
-        # Sketch of the PCIe topology relevant for media functions
-        rootComplexes:
-          - id: 0
-            domain: "0000"
-            # Optional link attributes useful for locality-sensitive placement
-            devices:
-              - name: "GPU0"
-                pciAddress: "0000:65:00.0"
-                gen: "Gen4"
-                width: "x16"
-                numaNode: 0
-              - name: "NIC0"
-                pciAddress: "0000:a1:00.0"
-                gen: "Gen5"
-                width: "x16"
-                numaNode: 0
-          - id: 1
-            domain: "0001"
-            devices:
-              - name: "GPU1"
-                pciAddress: "0001:41:00.0"
-                gen: "Gen4"
-                width: "x16"
-                numaNode: 1
-              - name: "NIC1"
-                pciAddress: "0001:b3:00.0"
-                gen: "Gen5"
-                width: "x16"
-                numaNode: 1
+        - name: eth1
+          bandwidth:
+            input:
+              min: 1000Mb
+              max: 2000Mb
+            output:
+              min: 500Mb
+              max: 1500Mb
+          features:
+            - vlan_support
+            - link_aggregation
 
-      gpus:
-        - vendor: "NVIDIA"
-          model: "RTX A4000"
-          pciAddress: "0000:41:00.0"
-          memory: "16Gi"
-          driver: "nvidia"
-          # If your MXL DRA driver wants to cross-check against a GPU DeviceClass
-          draDeviceClass: "nvidia.com/gpu"
-          # Optional: MIG/partitioning or other driver-specific toggles
-          capabilities:
-            - compute
-            - graphics
-            - encoder
-            - decoder
 
+      gpu:
+        - name: gpu_0
+          genration: Kepler
+          memory: 
+            min: 16GB
+            max: 32GB
+          compute_units: # some arbitrary unit of compute capability
+            min: 3840
+            max: 5120
+          capabilities: # driver-specific GPU features (e.g., CUDA compute capability, or a custom set of flags)
+            - tensor_operations
+            - high_precision_compute
+
+      memory:
+        type: ram
+        generation: DDR4
+        media_workload:
+          size: 16GB
+          throughput:
+            read: 40GB/s
+            write: 35GB/s
+
+        type: cache
+        level: L3
+        media_workload:
+          size: 128MB
+          throughput:
+            read: 200GB/s
+            write: 150GB/s
+
+      storage:
+        - name: nvme_0
+          type: spinning_disk # or nvme, ssd, hdd, etc.
+          media_workload:
+          size: 4MB
+          throughput:
+            read: 2000MB/s
+            write: 1800MB/s
+          latency: 100 microseconds # average access latency
+          iops: 100000 # input/output operations per second
